@@ -69,6 +69,7 @@ const historicalVisits: Visit[] = [
 const stored = <T,>(key: string, fallback: T): T => { try { return JSON.parse(localStorage.getItem(key) || '') } catch { return fallback } }
 const makeId = () => Math.random().toString(36).slice(2, 10)
 const makePoolCode = (pool: Pick<Pool, 'id' | 'codigo'>) => pool.codigo || `CL-${pool.id.toUpperCase()}`
+const clientUserForPool = (pool: Pool): User => ({ id: `client-${pool.id}`, fullName: `${pool.name} + ${pool.owner}`, email: pool.email, role: 'CLIENTE', poolId: pool.id, poolCode: makePoolCode(pool) })
 const uploadVisitPhoto = async (file: File) => { const result = await uploadBytes(ref(storage, `visits/${makeId()}-${file.name}`), file); return getDownloadURL(result.ref) }
 
 export default function App() {
@@ -81,7 +82,7 @@ export default function App() {
 
   useEffect(() => {
     const subscriptions = [
-      onSnapshot(collection(db, 'pools'), snapshot => { const nextPools = snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Pool)); setPools(nextPools); nextPools.filter(pool => !pool.codigo).forEach(pool => setDoc(doc(db, 'pools', pool.id), { codigo: makePoolCode(pool) }, { merge: true }).catch(() => undefined)) }, () => undefined),
+      onSnapshot(collection(db, 'pools'), snapshot => { const nextPools = snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Pool)); setPools(nextPools); nextPools.forEach(pool => { const codigo = makePoolCode(pool); if (!pool.codigo) setDoc(doc(db, 'pools', pool.id), { codigo }, { merge: true }).catch(() => undefined); setDoc(doc(db, 'users', `client-${pool.id}`), clientUserForPool({ ...pool, codigo }), { merge: true }).catch(() => undefined) }) }, () => undefined),
       onSnapshot(collection(db, 'visits'), snapshot => setVisits(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Visit))), () => undefined),
       onSnapshot(collection(db, 'users'), snapshot => setUsers(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as User))), () => undefined),
     ]
@@ -130,7 +131,7 @@ export default function App() {
   const titles: Record<View, string> = { visits: 'Resumen de visitas', pools: 'Tus piscinas', calculator: 'Calculadora de volumen', users: 'Equipo' }
 
   const saveVisit = async (visit: Visit) => { setVisits(current => current.some(item => item.id === visit.id) ? current.map(item => item.id === visit.id ? visit : item) : [visit, ...current]); await setDoc(doc(db, 'visits', visit.id), visit) }
-  const savePool = async (pool: Pool) => { const nextPool = { ...pool, codigo: makePoolCode(pool) }; try { await setDoc(doc(db, 'pools', nextPool.id), nextPool); setPools(current => [...current, nextPool]) } catch (error) { console.error('No se pudo guardar la piscina', error); throw error } }
+  const savePool = async (pool: Pool) => { const nextPool = { ...pool, codigo: makePoolCode(pool) }; try { await setDoc(doc(db, 'pools', nextPool.id), nextPool); await setDoc(doc(db, 'users', `client-${nextPool.id}`), clientUserForPool(nextPool), { merge: true }); setPools(current => [...current, nextPool]) } catch (error) { console.error('No se pudo guardar la piscina', error); throw error } }
   const updatePool = async (pool: Pool) => { const nextPool = { ...pool, codigo: makePoolCode(pool) }; setPools(current => current.map(item => item.id === nextPool.id ? nextPool : item)); await setDoc(doc(db, 'pools', nextPool.id), nextPool) }
   const deletePool = async (poolId: string) => { setPools(current => current.filter(item => item.id !== poolId)); await deleteDoc(doc(db, 'pools', poolId)) }
   const saveUser = async (nextUser: User) => { setUsers(current => current.some(item => item.id === nextUser.id) ? current.map(item => item.id === nextUser.id ? nextUser : item) : [...current, nextUser]); await setDoc(doc(db, 'users', nextUser.id), nextUser) }
