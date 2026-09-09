@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import type { Pool, User, Visit } from './types'
-import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc } from 'firebase/firestore'
-import { GoogleAuthProvider, signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth'
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore'
+import { GoogleAuthProvider, signInAnonymously, signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { auth, db, storage } from './firebase'
 import { jsPDF } from 'jspdf'
@@ -131,8 +131,8 @@ export default function App() {
   const titles: Record<View, string> = { visits: 'Resumen de visitas', pools: 'Tus piscinas', calculator: 'Calculadora de volumen', users: 'Equipo' }
 
   const saveVisit = async (visit: Visit) => { setVisits(current => current.some(item => item.id === visit.id) ? current.map(item => item.id === visit.id ? visit : item) : [visit, ...current]); await setDoc(doc(db, 'visits', visit.id), visit) }
-  const savePool = async (pool: Pool) => { const nextPool = { ...pool, codigo: makePoolCode(pool) }; try { await setDoc(doc(db, 'pools', nextPool.id), nextPool); await setDoc(doc(db, 'users', `client-${nextPool.id}`), clientUserForPool(nextPool), { merge: true }); setPools(current => [...current, nextPool]) } catch (error) { console.error('No se pudo guardar la piscina', error); throw error } }
-  const updatePool = async (pool: Pool) => { const nextPool = { ...pool, codigo: makePoolCode(pool) }; setPools(current => current.map(item => item.id === nextPool.id ? nextPool : item)); await setDoc(doc(db, 'pools', nextPool.id), nextPool) }
+  const savePool = async (pool: Pool) => { const nextPool = { ...pool, codigo: makePoolCode(pool) }; try { await setDoc(doc(db, 'pools', nextPool.id), nextPool); await setDoc(doc(db, 'users', `client-${nextPool.id}`), clientUserForPool(nextPool), { merge: true }) } catch (error) { console.error('No se pudo guardar la piscina', error); throw error } }
+  const updatePool = async (pool: Pool) => { const nextPool = { ...pool, codigo: makePoolCode(pool) }; await setDoc(doc(db, 'pools', nextPool.id), nextPool) }
   const deletePool = async (poolId: string) => { setPools(current => current.filter(item => item.id !== poolId)); await deleteDoc(doc(db, 'pools', poolId)) }
   const saveUser = async (nextUser: User) => { setUsers(current => current.some(item => item.id === nextUser.id) ? current.map(item => item.id === nextUser.id ? nextUser : item) : [...current, nextUser]); await setDoc(doc(db, 'users', nextUser.id), nextUser) }
   const deleteUser = async (userId: string) => { setUsers(current => current.filter(item => item.id !== userId)); await deleteDoc(doc(db, 'users', userId)) }
@@ -164,10 +164,11 @@ function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
     try {
       if (clientMode) {
         const normalized = email.trim().toUpperCase()
-        const snapshot = await getDocs(collection(db, 'users'))
-        const profile = snapshot.docs.map(item => ({ id: item.id, ...item.data() } as User)).find(item => item.role === 'CLIENTE' && item.poolCode?.toUpperCase() === normalized)
-        if (!profile) throw new Error('client-not-found')
-        onLogin(profile)
+        const authResult = await signInAnonymously(auth)
+        const snapshot = await getDocs(query(collection(db, 'pools'), where('codigo', '==', normalized)))
+        const pool = snapshot.docs[0] ? ({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Pool) : null
+        if (!pool) throw new Error('client-not-found')
+        onLogin({ id: authResult.user.uid, fullName: `${pool.name} + ${pool.owner}`, email: pool.email, role: 'CLIENTE', poolId: pool.id, poolCode: pool.codigo })
         return
       }
       const result = await signInWithEmailAndPassword(auth, email.trim(), password)
