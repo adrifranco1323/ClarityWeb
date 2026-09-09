@@ -106,6 +106,7 @@ export default function App() {
 
   if (!user) return <LoginForm onLogin={setUser} />
   if (user.role === 'PENDIENTE') return <div className="center-page"><div className="pending"><span className="brand-mark">💧</span><h2>Cuenta pendiente de aprobación</h2><p>Tu registro está siendo revisado por un administrador.</p><button className="secondary-button" onClick={() => setUser(null)}>Cerrar sesión</button></div></div>
+  if (user.role === 'CLIENTE') return <ClientDashboard user={user} pools={pools} visits={visits} onLogout={() => setUser(null)} />
 
   const items: [View, string, string][] = [
     ['visits', 'Visitas', '📅'],
@@ -122,7 +123,7 @@ export default function App() {
   const saveUser = async (nextUser: User) => { setUsers(current => current.some(item => item.id === nextUser.id) ? current.map(item => item.id === nextUser.id ? nextUser : item) : [...current, nextUser]); await setDoc(doc(db, 'users', nextUser.id), nextUser) }
   const deleteUser = async (userId: string) => { setUsers(current => current.filter(item => item.id !== userId)); await deleteDoc(doc(db, 'users', userId)) }
 
-  return <div className={dark ? 'app dark' : 'app'}><aside className="sidebar"><div className="brand"><span className="brand-mark">💧</span><div><strong>CLARITY</strong><small>SOLUTIONS</small></div></div><nav>{items.map(([key, label, icon]) => <button className={view === key ? 'nav-item active' : 'nav-item'} onClick={() => setView(key)} key={key}><span>{icon}</span>{label}</button>)}</nav><button className="nav-item logout" onClick={() => setUser(null)}><span>🚪</span>Cerrar sesión</button></aside><main><header><button className="mobile-menu">☰</button><div><span className="eyebrow">PANEL DE OPERACIONES</span><h1>{titles[view]}</h1></div><div className="header-actions"><span className="user-chip">{user.fullName.slice(0, 1)}<b>{user.fullName}</b></span><button className="icon-button" onClick={() => setDark(!dark)}>{dark ? '☀️' : '🌙'}</button></div></header><section className="content">{view === 'visits' && <Visits visits={visits} pools={pools} operator={user} onAdd={saveVisit} />}{view === 'pools' && <Pools pools={pools} isAdmin={user.role === 'ADMIN'} onAdd={savePool} onUpdate={updatePool} onDelete={deletePool} />}{view === 'calculator' && <Calculator />}{view === 'users' && <Users users={users} onUpdate={saveUser} onDelete={deleteUser} />}</section></main></div>
+  return <div className={dark ? 'app dark' : 'app'}><aside className="sidebar"><div className="brand"><span className="brand-mark">💧</span><div><strong>CLARITY</strong><small>SOLUTIONS</small></div></div><nav>{items.map(([key, label, icon]) => <button className={view === key ? 'nav-item active' : 'nav-item'} onClick={() => setView(key)} key={key}><span>{icon}</span>{label}</button>)}</nav><button className="nav-item logout" onClick={() => setUser(null)}><span>🚪</span>Cerrar sesión</button></aside><main><header><button className="mobile-menu">☰</button><div><span className="eyebrow">PANEL DE OPERACIONES</span><h1>{titles[view]}</h1></div><div className="header-actions"><span className="user-chip">{user.fullName.slice(0, 1)}<b>{user.fullName}</b></span><button className="icon-button" onClick={() => setDark(!dark)}>{dark ? '☀️' : '🌙'}</button></div></header><section className="content">{view === 'visits' && <Visits visits={visits} pools={pools} users={users} operator={user} onAdd={saveVisit} />}{view === 'pools' && <Pools pools={pools} isAdmin={user.role === 'ADMIN'} onAdd={savePool} onUpdate={updatePool} onDelete={deletePool} />}{view === 'calculator' && <Calculator />}{view === 'users' && <Users users={users} pools={pools} onUpdate={saveUser} onDelete={deleteUser} />}</section></main></div>
 }
 
 function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
@@ -146,6 +147,14 @@ function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
     setError('')
     setLoading(true)
     try {
+      if (!email.includes('@')) {
+        const normalized = email.trim().toLowerCase()
+        const snapshot = await getDocs(collection(db, 'users'))
+        const profile = snapshot.docs.map(item => ({ id: item.id, ...item.data() } as User)).find(item => item.role === 'CLIENTE' && item.password === password && item.fullName.toLowerCase() === normalized)
+        if (!profile) throw new Error('client-not-found')
+        onLogin(profile)
+        return
+      }
       const result = await signInWithEmailAndPassword(auth, email.trim(), password)
       await loadProfile(result.user)
     } catch (caught) {
@@ -181,7 +190,7 @@ function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
   return <div className="login-page simple-login" style={{ gridTemplateColumns: '1fr' }}><form className="login-form" onSubmit={loginWithPassword}>
     <div className="login-logo"><span className="brand-mark">💧</span><strong>CLARITY</strong></div>
     <div><span className="eyebrow">ACCESO DE USUARIOS</span><h1>Iniciar sesión</h1><p className="login-subtitle">Accede a tu panel de operaciones.</p></div>
-    <label className="field">Usuario<input type="email" autoComplete="username" placeholder="tu@email.com" value={email} onChange={event => setEmail(event.target.value)} required /></label>
+    <label className="field">Usuario o piscina<input type="text" autoComplete="username" placeholder="tu@email.com o nombre de piscina y dueño" value={email} onChange={event => setEmail(event.target.value)} required /></label>
     <label className="field">Contraseña<input type="password" autoComplete="current-password" placeholder="Tu contraseña" value={password} onChange={event => setPassword(event.target.value)} required /></label>
     {error && <p className="login-error">{error}</p>}
     <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Entrando...' : 'Entrar'}</button>
@@ -190,26 +199,36 @@ function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
   </form></div>
 }
 
-function Visits({ visits, pools, operator, onAdd }: { visits: Visit[]; pools: Pool[]; operator: User; onAdd: (v: Visit) => void }) {
+function ClientDashboard({ user, pools, visits, onLogout }: { user: User; pools: Pool[]; visits: Visit[]; onLogout: () => void }) {
+  const pool = pools.find(item => item.id === user.poolId) || pools.find(item => item.name.toLowerCase() === user.fullName.split('+')[0]?.trim().toLowerCase())
+  const clientVisits = pool ? visits.filter(visit => visit.piscina === pool.name) : []
+  return <div className="client-dashboard"><header className="client-header"><div><span className="eyebrow">PORTAL DE CLIENTE</span><h1>{pool?.name || 'Mis reportes'}</h1><p>{pool?.owner || user.fullName}</p></div><button className="secondary-button" onClick={onLogout}>Cerrar sesión</button></header><main className="client-content">{pool ? <Visits visits={clientVisits} pools={[pool]} operator={user} onAdd={() => undefined} readOnly /> : <div className="empty">Tu cuenta todavía no tiene una piscina asignada.</div>}</main></div>
+}
+
+function Visits({ visits, pools, users = [], operator, onAdd, readOnly = false }: { visits: Visit[]; pools: Pool[]; users?: User[]; operator: User; onAdd: (v: Visit) => void; readOnly?: boolean }) {
   const [show, setShow] = useState(false)
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null)
+  const [selectedClientId, setSelectedClientId] = useState('')
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [month, setMonth] = useState(new Date())
   const [openVisit, setOpenVisit] = useState<string | null>(null)
   const first = (new Date(month.getFullYear(), month.getMonth(), 1).getDay() + 6) % 7
   const total = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
-  const visitsForDay = visits.filter(visit => {
+  const selectedClient = users.find(user => user.id === selectedClientId)
+  const scopedVisits = selectedClient?.poolId ? visits.filter(visit => visit.piscina === pools.find(pool => pool.id === selectedClient.poolId)?.name) : visits
+  const scopedPools = selectedClient?.poolId ? pools.filter(pool => pool.id === selectedClient.poolId) : pools
+  const visitsForDay = scopedVisits.filter(visit => {
     const date = new Date(visit.fecha)
     return date.getFullYear() === selectedDate.getFullYear() && date.getMonth() === selectedDate.getMonth() && date.getDate() === selectedDate.getDate()
   })
-  const visitsForDate = (day: number) => visits.filter(visit => {
+  const visitsForDate = (day: number) => scopedVisits.filter(visit => {
     const date = new Date(visit.fecha)
     return date.getFullYear() === month.getFullYear() && date.getMonth() === month.getMonth() && date.getDate() === day
   })
   const scheduledForDate = (day: number) => {
     const date = new Date(month.getFullYear(), month.getMonth(), day)
     const dayOfWeek = date.getDay() === 0 ? 7 : date.getDay()
-    return pools.filter(pool => pool.scheduledDays.includes(dayOfWeek))
+    return scopedPools.filter(pool => pool.scheduledDays.includes(dayOfWeek))
   }
   const scheduledPoolsForSelectedDay = scheduledForDate(selectedDate.getDate()).filter(pool => !visitsForDay.some(visit => visit.piscina === pool.name))
   const selectDay = (day: number) => setSelectedDate(new Date(month.getFullYear(), month.getMonth(), day))
@@ -220,7 +239,7 @@ function Visits({ visits, pools, operator, onAdd }: { visits: Visit[]; pools: Po
     setOpenVisit(null)
   }
   return <>
-    <div className="section-heading"><div><span className="eyebrow">ACTIVIDAD OPERATIVA</span><h2>Calendario de visitas</h2></div><button className="primary-button compact" onClick={() => setShow(true)}>+ Registrar visita</button></div>
+    <div className="section-heading"><div><span className="eyebrow">{readOnly ? 'PORTAL DE CLIENTE' : 'ACTIVIDAD OPERATIVA'}</span><h2>Calendario de visitas</h2></div><div className="visit-toolbar">{!readOnly && <select className="client-filter" value={selectedClientId} onChange={event => setSelectedClientId(event.target.value)}><option value="">Todos los clientes</option>{users.filter(user => user.role === 'CLIENTE').map(client => <option key={client.id} value={client.id}>{client.fullName}</option>)}</select>}{!readOnly && <button className="primary-button compact" onClick={() => setShow(true)}>+ Registrar visita</button>}</div></div>
     <div className="visit-calendar-panel">
       <div className="calendar-toolbar"><button className="month-arrow" onClick={() => changeMonth(-1)} aria-label="Mes anterior">←</button><strong>{month.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}</strong><button className="month-arrow" onClick={() => changeMonth(1)} aria-label="Mes siguiente">→</button></div>
       <div className="calendar-head">{['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(day => <span key={day}>{day}</span>)}</div>
@@ -229,9 +248,9 @@ function Visits({ visits, pools, operator, onAdd }: { visits: Visit[]; pools: Po
     <div className="calendar-legend"><span><i className="visit-indicator" /> Visita realizada</span><span><i className="scheduled-indicator" /> Visita agendada</span></div>
     <div className="selected-day-heading"><div><span className="eyebrow">VISITAS DEL DÍA</span><h2>{selectedDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</h2></div><span className="visit-total">{visitsForDay.length} {visitsForDay.length === 1 ? 'visita' : 'visitas'}</span></div>
     <div className="visit-detail-list">{visitsForDay.length ? visitsForDay.map(visit => <VisitDetail key={visit.id} visit={visit} open={openVisit === visit.id} onToggle={() => setOpenVisit(openVisit === visit.id ? null : visit.id)} onEdit={() => setEditingVisit(visit)} />) : <div className="empty">No hay visitas registradas para este día.</div>}</div>
-    {scheduledPoolsForSelectedDay.length > 0 && <div className="scheduled-pools"><div className="section-heading"><div><span className="eyebrow">AGENDA PENDIENTE</span><h2>Piscinas previstas para este día</h2></div></div>{scheduledPoolsForSelectedDay.map(pool => <div className="scheduled-pool-row" key={pool.id}><span className="pool-icon small">🏊</span><div><strong>{pool.name}</strong><span>{pool.owner} · {pool.location}</span></div><span className="status scheduled-status">Pendiente</span></div>)}</div>}
-    {show && <VisitForm pools={pools} operator={operator} onClose={() => setShow(false)} onSave={visit => { onAdd(visit); setShow(false) }} />}
-    {editingVisit && <VisitForm pools={pools} operator={operator} visitToEdit={editingVisit} onClose={() => setEditingVisit(null)} onSave={visit => { onAdd(visit); setEditingVisit(null) }} />}
+    {!readOnly && scheduledPoolsForSelectedDay.length > 0 && <div className="scheduled-pools"><div className="section-heading"><div><span className="eyebrow">AGENDA PENDIENTE</span><h2>Piscinas previstas para este día</h2></div></div>{scheduledPoolsForSelectedDay.map(pool => <div className="scheduled-pool-row" key={pool.id}><span className="pool-icon small">🏊</span><div><strong>{pool.name}</strong><span>{pool.owner} · {pool.location}</span></div><span className="status scheduled-status">Pendiente</span></div>)}</div>}
+    {!readOnly && show && <VisitForm pools={pools} operator={operator} onClose={() => setShow(false)} onSave={visit => { onAdd(visit); setShow(false) }} />}
+    {!readOnly && editingVisit && <VisitForm pools={pools} operator={operator} visitToEdit={editingVisit} onClose={() => setEditingVisit(null)} onSave={visit => { onAdd(visit); setEditingVisit(null) }} />}
   </>
 }
 
@@ -415,5 +434,5 @@ function Detail({ label, value }: { label: string; value: string }) { return <di
 
 function Calculator() { const [shape, setShape] = useState('Rectangular'); const [length, setLength] = useState(''); const [width, setWidth] = useState(''); const [diameter, setDiameter] = useState(''); const [depths, setDepths] = useState(['', '', '']); const average = depths.map(Number).filter(value => value > 0).reduce((a, b) => a + b, 0) / (depths.filter(value => Number(value) > 0).length || 1); const volume = shape === 'Circular' ? Math.PI * (Number(diameter) / 2) ** 2 * average : shape === 'Ovalada' ? Math.PI * (Number(length) / 2) * (Number(width) / 2) * average : Number(length) * Number(width) * average; return <><div className="section-heading"><div><span className="eyebrow">HERRAMIENTA DE CAMPO</span><h2>Calculadora de volumen</h2></div></div><div className="calculator"><div className="calc-form"><span className="label-title">Forma de la piscina</span><div className="segmented">{['Rectangular','Circular','Ovalada'].map(option => <button className={shape === option ? 'selected' : ''} onClick={() => setShape(option)} key={option}>{option}</button>)}</div>{shape === 'Circular' ? <label>Diámetro (m)<input type="number" value={diameter} onChange={event => setDiameter(event.target.value)} /></label> : <div className="form-grid"><label>Largo (m)<input type="number" value={length} onChange={event => setLength(event.target.value)} /></label><label>Ancho (m)<input type="number" value={width} onChange={event => setWidth(event.target.value)} /></label></div>}<span className="label-title">Profundidades (m)</span>{['Parte baja','Centro','Parte profunda'].map((label, index) => <label key={label}>{label}<input type="number" value={depths[index]} onChange={event => setDepths(depths.map((value, position) => position === index ? event.target.value : value))} /></label>)}</div><div className="result-card"><span>VOLUMEN TOTAL</span><strong>{volume.toFixed(2)} <small>m³</small></strong><p>{(volume * 1000).toFixed(0)} litros</p><i>Profundidad media: {average.toFixed(2)} m</i></div></div></> }
 
-function Users({ users, onUpdate, onDelete }: { users: User[]; onUpdate: (user: User) => void; onDelete: (id: string) => void }) { const [show, setShow] = useState(false); const [editing, setEditing] = useState<User | null>(null); return <><div className="section-heading"><div><span className="eyebrow">CONTROL DE ACCESO</span><h2>Equipo</h2></div><button className="primary-button compact" onClick={() => setShow(true)}>+ Agregar usuario</button></div><div className="user-table"><div className="table-head"><span>Persona</span><span>Correo</span><span>Rol</span><span>Acciones</span></div>{users.map(user => <div className="table-row" key={user.id}><div className="person"><span>{user.fullName.slice(0, 1)}</span><b>{user.fullName}</b></div><span>{user.email}</span><span>{user.role}</span><div className="user-actions"><button className="secondary-button" onClick={() => setEditing(user)}>Editar</button><button className="danger-button" onClick={() => onDelete(user.id)}>Eliminar</button></div></div>)}</div>{show && <UserForm onClose={() => setShow(false)} onSave={user => { onUpdate(user); setShow(false) }} />}{editing && <UserForm user={editing} onClose={() => setEditing(null)} onSave={user => { onUpdate(user); setEditing(null) }} />}</> }
-function UserForm({ user, onClose, onSave }: { user?: User; onClose: () => void; onSave: (user: User) => void }) { const [fullName, setFullName] = useState(user?.fullName || ''); const [email, setEmail] = useState(user?.email || ''); const [password, setPassword] = useState(user?.password || ''); const [role, setRole] = useState<User['role']>(user?.role || 'OPERARIO'); return <div className="modal-backdrop"><form className="modal user-form" onSubmit={event => { event.preventDefault(); onSave({ id: user?.id || makeId(), fullName, email, password, role }) }}><div className="modal-head"><h2>{user ? 'Editar usuario' : 'Agregar usuario'}</h2><button type="button" onClick={onClose}>×</button></div><label>Nombre<input value={fullName} onChange={event => setFullName(event.target.value)} required /></label><label>Correo<input type="email" value={email} onChange={event => setEmail(event.target.value)} required /></label><label>Contraseña<input type="password" value={password} onChange={event => setPassword(event.target.value)} /></label><label>Rol<select value={role} onChange={event => setRole(event.target.value as User['role'])}><option>ADMIN</option><option>OPERARIO</option><option>PENDIENTE</option></select></label><button className="primary-button" type="submit">Guardar usuario</button></form></div> }
+function Users({ users, pools, onUpdate, onDelete }: { users: User[]; pools: Pool[]; onUpdate: (user: User) => void; onDelete: (id: string) => void }) { const [show, setShow] = useState(false); const [editing, setEditing] = useState<User | null>(null); return <><div className="section-heading"><div><span className="eyebrow">CONTROL DE ACCESO</span><h2>Equipo</h2></div><button className="primary-button compact" onClick={() => setShow(true)}>+ Agregar usuario</button></div><div className="user-table"><div className="table-head"><span>Persona</span><span>Correo</span><span>Rol</span><span>Acciones</span></div>{users.map(user => <div className="table-row" key={user.id}><div className="person"><span>{user.fullName.slice(0, 1)}</span><b>{user.fullName}</b></div><span>{user.email}</span><span>{user.role}</span><div className="user-actions"><button className="secondary-button" onClick={() => setEditing(user)}>Editar</button><button className="danger-button" onClick={() => onDelete(user.id)}>Eliminar</button></div></div>)}</div>{show && <UserForm pools={pools} onClose={() => setShow(false)} onSave={user => { onUpdate(user); setShow(false) }} />}{editing && <UserForm pools={pools} user={editing} onClose={() => setEditing(null)} onSave={user => { onUpdate(user); setEditing(null) }} />}</> }
+function UserForm({ pools, user, onClose, onSave }: { pools: Pool[]; user?: User; onClose: () => void; onSave: (user: User) => void }) { const [fullName, setFullName] = useState(user?.fullName || ''); const [email, setEmail] = useState(user?.email || ''); const [password, setPassword] = useState(user?.password || ''); const [role, setRole] = useState<User['role']>(user?.role || 'OPERARIO'); const [poolId, setPoolId] = useState(user?.poolId || ''); return <div className="modal-backdrop"><form className="modal user-form" onSubmit={event => { event.preventDefault(); onSave({ id: user?.id || makeId(), fullName, email, password, role, poolId: role === 'CLIENTE' ? poolId : undefined }) }}><div className="modal-head"><h2>{user ? 'Editar usuario' : 'Agregar usuario'}</h2><button type="button" onClick={onClose}>×</button></div><label>Nombre o piscina + dueño<input value={fullName} onChange={event => setFullName(event.target.value)} required /></label><label>Correo<input type="email" value={email} onChange={event => setEmail(event.target.value)} /></label><label>Contraseña<input type="password" value={password} onChange={event => setPassword(event.target.value)} required={!user} /></label><label>Rol<select value={role} onChange={event => setRole(event.target.value as User['role'])}><option>ADMIN</option><option>OPERARIO</option><option>CLIENTE</option><option>PENDIENTE</option></select></label>{role === 'CLIENTE' && <label>Piscina<select value={poolId} onChange={event => setPoolId(event.target.value)} required><option value="">Selecciona una piscina</option>{pools.map(pool => <option key={pool.id} value={pool.id}>{pool.name} / {pool.owner}</option>)}</select></label>}<button className="primary-button" type="submit">Guardar usuario</button></form></div> }

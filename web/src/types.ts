@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'OPERARIO' | 'PENDIENTE'
-export interface User { id: string; fullName: string; email: string; password?: string; role: UserRole }
+export type UserRole = 'ADMIN' | 'OPERARIO' | 'CLIENTE' | 'PENDIENTE'
+export interface User { id: string; fullName: string; email: string; password?: string; role: UserRole; poolId?: string }
 export interface Pool { id: string; name: string; owner: string; location: string; phone: string; email: string; managementCompany: string; size: number; visitsPerWeek: number; scheduledDays: number[]; monthlyPayment: number }
 export interface Visit { id: string; fecha: number; operador: string; operadorId?: string; piscina: string; cloroInicial: number; phInicial: number; alcalinidadInicial: number; durezaCalcica: number; acidoCianuro: number; notas: string; hasAlguicida: boolean; hasAspirado: boolean; hasCepillado: boolean; hasLimpiezaCanasta: boolean; hasLimpiezaSkimer: boolean; hasLimpiezaCanastaBomba: boolean; hasCheckeoCuartoMaquinas: boolean; hasMantenimientoBomba: boolean; hasRellenoAgua: boolean; hasCloroShock: boolean; chlorineTablets: number; arrivalPhoto1?: string; arrivalPhoto1Time?: number; arrivalPhoto2?: string; arrivalPhoto2Time?: number; afterPhoto1?: string; afterPhoto1Time?: number; afterPhoto2?: string; afterPhoto2Time?: number; exitPhoto?: string; exitPhotoTime?: number }
