@@ -81,7 +81,7 @@ export default function App() {
 
   useEffect(() => {
     const subscriptions = [
-      onSnapshot(collection(db, 'pools'), snapshot => setPools(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Pool))), () => undefined),
+      onSnapshot(collection(db, 'pools'), snapshot => { const nextPools = snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Pool)); setPools(nextPools); nextPools.filter(pool => !pool.codigo).forEach(pool => setDoc(doc(db, 'pools', pool.id), { codigo: makePoolCode(pool) }, { merge: true }).catch(() => undefined)) }, () => undefined),
       onSnapshot(collection(db, 'visits'), snapshot => setVisits(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Visit))), () => undefined),
       onSnapshot(collection(db, 'users'), snapshot => setUsers(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as User))), () => undefined),
     ]
