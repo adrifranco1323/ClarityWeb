@@ -129,6 +129,7 @@ export default function App() {
 function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [clientMode, setClientMode] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -147,7 +148,7 @@ function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
     setError('')
     setLoading(true)
     try {
-      if (!email.includes('@')) {
+      if (clientMode) {
         const normalized = email.trim().toLowerCase()
         const snapshot = await getDocs(collection(db, 'users'))
         const profile = snapshot.docs.map(item => ({ id: item.id, ...item.data() } as User)).find(item => item.role === 'CLIENTE' && item.password === password && item.fullName.toLowerCase() === normalized)
@@ -189,13 +190,14 @@ function LoginForm({ onLogin }: { onLogin: (user: User) => void }) {
 
   return <div className="login-page simple-login" style={{ gridTemplateColumns: '1fr' }}><form className="login-form" onSubmit={loginWithPassword}>
     <div className="login-logo"><span className="brand-mark">💧</span><strong>CLARITY</strong></div>
-    <div><span className="eyebrow">ACCESO DE USUARIOS</span><h1>Iniciar sesión</h1><p className="login-subtitle">Accede a tu panel de operaciones.</p></div>
-    <label className="field">Usuario o piscina<input type="text" autoComplete="username" placeholder="tu@email.com o nombre de piscina y dueño" value={email} onChange={event => setEmail(event.target.value)} required /></label>
+    <div><span className="eyebrow">{clientMode ? 'ACCESO DE CLIENTES' : 'ACCESO DE USUARIOS'}</span><h1>{clientMode ? 'Portal de cliente' : 'Iniciar sesión'}</h1><p className="login-subtitle">{clientMode ? 'Consulta las visitas y reportes de tu piscina.' : 'Accede a tu panel de operaciones.'}</p></div>
+    <label className="field">{clientMode ? 'Piscina + dueño' : 'Correo electrónico'}<input type={clientMode ? 'text' : 'email'} autoComplete="username" placeholder={clientMode ? 'Vista Marina + María García' : 'tu@email.com'} value={email} onChange={event => setEmail(event.target.value)} required /></label>
     <label className="field">Contraseña<input type="password" autoComplete="current-password" placeholder="Tu contraseña" value={password} onChange={event => setPassword(event.target.value)} required /></label>
     {error && <p className="login-error">{error}</p>}
     <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Entrando...' : 'Entrar'}</button>
     <div className="login-divider"><span>o</span></div>
     <button className="google-button" type="button" onClick={loginWithGoogle} disabled={loading}><span>G</span> Continuar con Google</button>
+    <button className="login-mode-button" type="button" onClick={() => { setClientMode(!clientMode); setEmail(''); setPassword(''); setError('') }} disabled={loading}>{clientMode ? 'Volver al acceso administrativo' : 'Ingresar como cliente'}</button>
   </form></div>
 }
 
