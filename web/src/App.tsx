@@ -24,6 +24,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [view, setView] = useState<View>('visits')
   const [dark, setDark] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   // Sincronización en tiempo real desde Cloud Firestore
   useEffect(() => {
@@ -276,14 +277,20 @@ export default function App() {
   }
 
   const saveUser = async (nextUser: User) => {
+    const cleanUser = JSON.parse(JSON.stringify(nextUser))
     setUsers(current =>
       current.some(item => item.id === nextUser.id)
         ? current.map(item => (item.id === nextUser.id ? nextUser : item))
         : [...current, nextUser]
     )
-    await setDoc(doc(db, 'users', nextUser.id), nextUser)
-    if (nextUser.role === 'CLIENTE' && nextUser.poolId && nextUser.poolCode) {
-      await setDoc(doc(db, 'pools', nextUser.poolId), { codigo: nextUser.poolCode }, { merge: true })
+    try {
+      await setDoc(doc(db, 'users', nextUser.id), cleanUser, { merge: true })
+      if (nextUser.role === 'CLIENTE' && nextUser.poolId && nextUser.poolCode) {
+        await setDoc(doc(db, 'pools', nextUser.poolId), { codigo: nextUser.poolCode }, { merge: true })
+      }
+    } catch (error) {
+      console.error('Error al guardar usuario en Firestore:', error)
+      throw error
     }
   }
 
@@ -317,7 +324,34 @@ export default function App() {
 
   return (
     <div className={dark ? 'app dark' : 'app'}>
-      <aside className="sidebar">
+      {/* Barra superior de navegación para teléfonos y tablets */}
+      <nav className="mobile-top-nav" aria-label="Navegación móvil">
+        <div className="mobile-nav-scroll">
+          {items.map(([key, label, icon]) => (
+            <button
+              className={view === key ? 'mobile-nav-chip active' : 'mobile-nav-chip'}
+              onClick={() => setView(key)}
+              key={key}
+              type="button"
+            >
+              <span>{icon}</span>
+              <b>{label}</b>
+            </button>
+          ))}
+          <button
+            className="mobile-nav-chip"
+            onClick={() => setUser(null)}
+            key="logout-mobile"
+            type="button"
+            style={{ color: '#e89898' }}
+          >
+            <span>🚪</span>
+            <b>Salir</b>
+          </button>
+        </div>
+      </nav>
+
+      <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
         <div className="brand">
           <span className="brand-mark">💧</span>
           <div>
@@ -329,7 +363,10 @@ export default function App() {
           {items.map(([key, label, icon]) => (
             <button
               className={view === key ? 'nav-item active' : 'nav-item'}
-              onClick={() => setView(key)}
+              onClick={() => {
+                setView(key)
+                setMobileMenuOpen(false)
+              }}
               key={key}
             >
               <span>{icon}</span>
@@ -344,7 +381,14 @@ export default function App() {
 
       <main>
         <header>
-          <button className="mobile-menu">☰</button>
+          <button
+            className="mobile-menu"
+            type="button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label="Abrir menú"
+          >
+            {mobileMenuOpen ? '✕' : '☰'}
+          </button>
           <div>
             <span className="eyebrow">PANEL DE OPERACIONES</span>
             <h1>{titles[view]}</h1>

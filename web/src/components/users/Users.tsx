@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { FormEvent, useState } from 'react'
 import type { Pool, User } from '../../types'
 import { makeId, makePoolCode } from '../../utils/helpers'
 
 interface UsersProps {
   users: User[]
   pools: Pool[]
-  onUpdate: (user: User) => void
-  onDelete: (id: string) => void
+  onUpdate: (user: User) => Promise<void> | void
+  onDelete: (id: string) => Promise<void> | void
 }
 
 export function Users({ users, pools, onUpdate, onDelete }: UsersProps) {
@@ -43,7 +43,14 @@ export function Users({ users, pools, onUpdate, onDelete }: UsersProps) {
               <button className="secondary-button" onClick={() => setEditing(user)}>
                 Editar
               </button>
-              <button className="danger-button" onClick={() => onDelete(user.id)}>
+              <button
+                className="danger-button"
+                onClick={() => {
+                  if (window.confirm(`¿Estás seguro de eliminar el usuario ${user.fullName}?`)) {
+                    onDelete(user.id)
+                  }
+                }}
+              >
                 Eliminar
               </button>
             </div>
@@ -54,8 +61,8 @@ export function Users({ users, pools, onUpdate, onDelete }: UsersProps) {
         <UserForm
           pools={pools}
           onClose={() => setShow(false)}
-          onSave={user => {
-            onUpdate(user)
+          onSave={async user => {
+            await onUpdate(user)
             setShow(false)
           }}
         />
@@ -65,8 +72,8 @@ export function Users({ users, pools, onUpdate, onDelete }: UsersProps) {
           pools={pools}
           user={editing}
           onClose={() => setEditing(null)}
-          onSave={user => {
-            onUpdate(user)
+          onSave={async user => {
+            await onUpdate(user)
             setEditing(null)
           }}
         />
@@ -84,7 +91,7 @@ export function UserForm({
   pools: Pool[]
   user?: User
   onClose: () => void
-  onSave: (user: User) => void
+  onSave: (user: User) => Promise<void> | void
 }) {
   const [fullName, setFullName] = useState(user?.fullName || '')
   const [email, setEmail] = useState(user?.email || '')
@@ -95,6 +102,8 @@ export function UserForm({
   const [poolCode, setPoolCode] = useState(
     user?.poolCode || (selectedPool ? makePoolCode(selectedPool) : '')
   )
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const handlePoolChange = (newPoolId: string) => {
     setPoolId(newPoolId)
@@ -104,28 +113,47 @@ export function UserForm({
     }
   }
 
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const cleanCode = poolCode.trim().toUpperCase()
+      const payload: Partial<User> & { id: string; fullName: string; email: string; role: User['role'] } = {
+        id: user?.id || makeId(),
+        fullName: fullName.trim(),
+        email: email.trim(),
+        role
+      }
+
+      if (role === 'CLIENTE') {
+        if (poolId) payload.poolId = poolId
+        payload.poolCode = cleanCode || (selectedPool ? makePoolCode(selectedPool) : undefined)
+      } else {
+        if (password.trim()) {
+          payload.password = password.trim()
+        } else if (user?.password) {
+          payload.password = user.password
+        }
+      }
+
+      await onSave(payload as User)
+    } catch (err: any) {
+      console.error('Error al guardar usuario:', err)
+      setError(err?.message || 'No se pudo guardar el usuario en Firebase.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="modal-backdrop">
-      <form
-        className="modal user-form"
-        onSubmit={event => {
-          event.preventDefault()
-          const cleanCode = poolCode.trim().toUpperCase()
-          onSave({
-            id: user?.id || makeId(),
-            fullName,
-            email,
-            password: role === 'CLIENTE' ? undefined : password,
-            role,
-            poolId: role === 'CLIENTE' ? poolId : undefined,
-            poolCode: role === 'CLIENTE' ? (cleanCode || (selectedPool ? makePoolCode(selectedPool) : undefined)) : undefined
-          })
-        }}
-      >
+      <form className="modal user-form" onSubmit={handleSubmit}>
         <div className="modal-head">
           <h2>{user ? 'Editar usuario' : 'Agregar usuario'}</h2>
           <button type="button" onClick={onClose}>×</button>
         </div>
+        {error && <p className="login-error">{error}</p>}
         <label>Nombre o piscina + dueño
           <input value={fullName} onChange={event => setFullName(event.target.value)} required />
         </label>
@@ -133,21 +161,22 @@ export function UserForm({
           <input type="email" value={email} onChange={event => setEmail(event.target.value)} />
         </label>
         {role !== 'CLIENTE' && (
-          <label>Contraseña
+          <label>Contraseña {user ? '(dejar en blanco para no cambiarla)' : ''}
             <input
               type="password"
               value={password}
               onChange={event => setPassword(event.target.value)}
+              placeholder={user ? '••••••••' : 'Contraseña'}
               required={!user}
             />
           </label>
         )}
         <label>Rol
           <select value={role} onChange={event => setRole(event.target.value as User['role'])}>
-            <option>ADMIN</option>
-            <option>OPERARIO</option>
-            <option>CLIENTE</option>
-            <option>PENDIENTE</option>
+            <option value="ADMIN">ADMIN</option>
+            <option value="OPERARIO">OPERARIO</option>
+            <option value="CLIENTE">CLIENTE</option>
+            <option value="PENDIENTE">PENDIENTE</option>
           </select>
         </label>
         {role === 'CLIENTE' && (
@@ -172,8 +201,8 @@ export function UserForm({
             </label>
           </>
         )}
-        <button className="primary-button" type="submit">
-          Guardar usuario
+        <button className="primary-button" type="submit" disabled={loading}>
+          {loading ? 'Guardando...' : 'Guardar usuario'}
         </button>
       </form>
     </div>
